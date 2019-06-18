@@ -313,6 +313,9 @@ Function Add-GlpiItem {
     $Details = @{input=$Details}
     $SessionToken = GetGLPISessionToken -Creds $Creds
     $json = ConvertTo-Json $Details
+    if (($Details["input"] | Get-Member -MemberType Properties).Count -eq 1){
+        $json = $json.Remove(($lastIndex = $json.LastIndexOf("]")),1).Insert($lastIndex,"").Remove(($firstIndex = $json.IndexOf("[")),1).Insert($firstIndex,"")
+    }
     $AddResult = Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)" -Method Post -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -Body $json -ContentType 'application/json'
     Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
     return $AddResult
@@ -361,6 +364,9 @@ Function Update-GlpiItem {
     $Details = @{input=$Details}
     $SessionToken = GetGLPISessionToken -Creds $Creds
     $json = $Details | ConvertTo-Json
+    if (($Details["input"] | Get-Member -MemberType Properties).Count -eq 1){
+        $json = $json.Remove(($lastIndex = $json.LastIndexOf("]")),1).Insert($lastIndex,"").Remove(($firstIndex = $json.IndexOf("[")),1).Insert($firstIndex,"")
+    }
     $AddResult = Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)" -Method Put -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -Body $json -ContentType 'application/json'
     Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
     return $AddResult
@@ -401,7 +407,24 @@ Function Remove-GlpiItems {
     Author:  Jean-Christophe Pirmolin #>
     param([parameter(Mandatory=$true)][String]$ItemType, [parameter(Mandatory=$true)]$IDs, [Boolean]$Purge=$false, [Boolean]$History=$true, [parameter(Mandatory=$true)][object]$Creds)
     # Build array of IDs.
-    $IDs.gettype()
-    #$SessionToken = GetGLPISessionToken -Creds $Creds
-    #Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"}
+    if ($IDs -notcontains "ID"){
+        $ids2 = @()
+        foreach ($ID in $IDs){
+            $hash = [ordered]@{}
+            $hash.add("id" , $ID)
+            $ids2 += [pscustomobject]$hash
+        }
+        $IDs = $ids2
+    }
+    $Details = @{
+        input=$IDs
+        force_purge =  $Purge
+        history = $History}
+    $json = $Details | ConvertTo-Json
+    #if (($Details["input"] | Get-Member -MemberType Properties).Count -eq 1){
+    #    $json = $json.Remove(($lastIndex = $json.LastIndexOf("]")),1).Insert($lastIndex,"").Remove(($firstIndex = $json.IndexOf("[")),1).Insert($firstIndex,"")
+   # }
+   $SessionToken = GetGLPISessionToken -Creds $Creds
+    Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)" -Method Delete -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -Body $json -ContentType 'application/json'
+    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
 }
