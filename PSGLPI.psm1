@@ -5,7 +5,12 @@ Function GetGLPISessionToken {
     #Get-Date -f T | write-host -NoNewLine
     #Write-Host " Enter Function"
     $Creds.AuthorizationType
-    if (("Basic","user_token") -ccontains $Creds.AuthorizationType) {Invoke-RestMethod "$($Creds.AppURL)/initSession" -Headers @{"Content-Type" = "application/json";"Authorization" = "$($Creds.AuthorizationType) $($Creds.UserToken)";"App-Token"=$Creds.AppToken}}
+    if (("Basic","user_token") -ccontains $Creds.AuthorizationType) {
+        $SessionToken = Invoke-RestMethod "$($Creds.AppURL)/initSession" -Headers @{"Content-Type" = "application/json";"Authorization" = "$($Creds.AuthorizationType) $($Creds.UserToken)";"App-Token"=$Creds.AppToken}
+        # extra restMethod as the first one always return HTML login page instead of result
+        Invoke-RestMethod "$($Creds.AppUrl)/getActiveProfile/" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
+        return $SessionToken
+    }
     else {Write-Host 'AuthorizationType MUST be "user-token" or "Basic". This is Case Sensitive.' -ForegroundColor Red}
 }
 
