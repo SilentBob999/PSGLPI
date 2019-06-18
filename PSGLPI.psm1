@@ -21,7 +21,7 @@ function Get-GlpiBase64Login {
 .DESCRIPTION
     Generate the Base64 login & password string used to authenticate with GLPI.
 .PARAMETER login
-    User name 
+    User name
 .PARAMETER password
     Password
 .EXAMPLE
@@ -47,7 +47,7 @@ Function Get-GlpiItems {
     Retrieve all items of a specific item type by range.
     Useful for instance, to load a list in memory and avoid multiple call to an existing collection.
 .PARAMETER ItemType
-    Type of item wanted. 
+    Type of item wanted.
     Exemples : Computer, Monitor, User, etc.
 .PARAMETER Range
     Range of the results.
@@ -75,7 +75,7 @@ Function Get-GlpiItems {
     $SearchResult = Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)/?range=$($Range)" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"}
     if ($SearchResult.Count -ge 1) {$SearchResult}
     else {$false}
-    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"}
+    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
 }
 
 Function Get-GlpiItem {
@@ -86,10 +86,10 @@ Function Get-GlpiItem {
     Retrieve a specific item.
     Return the instance fields of item identified by id
 .PARAMETER ItemType
-    Type of item wanted. 
+    Type of item wanted.
     Exemples : Computer, Monitor, User, etc.
 .PARAMETER ID
-    ID of item wanted. 
+    ID of item wanted.
     Exemples : 114
 .PARAMETER Creds
     Credetials for the GLPI API. This is an object.
@@ -112,22 +112,24 @@ Function Get-GlpiItem {
     $SearchResult = Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)/$($ID)?$QueryOptions" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction Ignore
     if ($SearchResult) {$SearchResult}
     else {$false}
-    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"}
+    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
 }
 
 Function Get-GlpiSubItems {
     <#
 .SYNOPSIS
-    Get a specific item by item type.
+    Get a sub_itemtype for the identified item.
 .DESCRIPTION
-    Retrieve a specific item.
-    Return the instance fields of item identified by id
+    Return a collection of rows of the sub_itemtype for the identified item.
 .PARAMETER ItemType
-    Type of item wanted. 
+    Type of item wanted.
     Exemples : Computer, Monitor, User, etc.
 .PARAMETER ID
-    ID of item wanted. 
+    ID of item wanted.
     Exemples : 114
+.PARAMETER Relation
+    Name of the subitem.
+    Exemples : Infocom, NetworkPort, ComputerModel, etc.
 .PARAMETER Creds
     Credetials for the GLPI API. This is an object.
     Exemple : $GlpiCreds = @{
@@ -137,7 +139,7 @@ Function Get-GlpiSubItems {
                     AuthorizationType = "Basic" or "user_token"
                     }
 .EXAMPLE
-     Get-GlpiItem -ItemType "Monitor" -ID 114 -Creds $GlpiCreds
+     Get-GlpiItem -ItemType "computer" -ID 114 -Creds $GlpiCreds -Relation infocom
 .INPUTS
     None
 .OUTPUTS
@@ -149,7 +151,7 @@ Function Get-GlpiSubItems {
     $SearchResult = Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)/$($ID)/$($Relation)?$QueryOptions" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction Ignore
     if ($SearchResult) {$SearchResult}
     else {$false}
-    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"}
+    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
 }
 
 Function Search-GlpiItem {
@@ -163,7 +165,7 @@ Function Search-GlpiItem {
     Note : you can use 'AllAssets' itemtype to retrieve a combination of all asset's types.
     Exemples : Computer, Monitor, User, etc.
 .PARAMETER SearchOptions
-    SearchOptions should be given in a form of array of arrays. 
+    SearchOptions should be given in a form of array of arrays.
     ("AND",1,"contains","AMC0132"),("OR",1,"contains","AMC0176)
     If only ONE criteria is present, start with a COMA!
      ,("OR",1,"contains","AMC0176")
@@ -172,6 +174,10 @@ Function Search-GlpiItem {
     If you want to retreive a specific field that is missing the default result view, you can add it to the SearchOptions under the form of ,("OR",[FieldID],"contains","")
     Exemples : ("AND",1,"contains","AMC"),("AND",105,"is","Luxembourg") to find items that contains "AMC" in the name AND are located in "Luxembourg".
     ,("OR",1,"contains","AMC0176") to find items that contains "AMC0176" in the name.
+.PARAMETER ForceDisplay
+    A simple array of desired fields in the answer. Based on visible fields with Get-GlpiSearchOptions.
+    Fields can be numbered or named for more lax use.
+    Examples: @("hostnamefield", "otherserial", "1", "2", "5")
 .PARAMETER Range
     Range of the results. (Optional, default is 0-999)
     Exemple : 0-199
@@ -184,15 +190,15 @@ Function Search-GlpiItem {
                     AuthorizationType = "Basic" or "user_token"
                     }
 .EXAMPLE
-     Search-GlpiItem -ItemType "Monitor" -SearchOptions ("AND",21,"is","737386"),("OR",13,"contains","") -Creds $GlpiCreds
+     Search-GlpiItem -ItemType "Monitor" -SearchOptions @(,@("AND",1,"is","DELL P2214H")) -ForceDisplay @("1","2","4","serial") -Creds $GlpiCreds
 .INPUTS
     None
 .OUTPUTS
     Array
 .NOTES
     Author:  Jean-Christophe Pirmolin #>
-    param([Parameter(Mandatory=$true)][String] $ItemType,[Parameter(Mandatory=$true)][array] $SearchOptions,[String]$Range="0-999",[Parameter(Mandatory=$true)][Object] $Creds)
-    
+    param([Parameter(Mandatory=$true)][String] $ItemType,[Parameter(Mandatory=$true)][array] $SearchOptions,[String]$Range="0-999",[array]$ForceDisplay=@("1","2"),[Parameter(Mandatory=$true)][Object] $Creds)
+
     # Building the SearchOptions String
     $i=0
     foreach ($Criteria in $SearchOptions) {
@@ -202,12 +208,19 @@ Function Search-GlpiItem {
         }
         $i++
     }
-    
     $SessionToken = GetGLPISessionToken -Creds $Creds
-    $SearchResult = Invoke-RestMethod "$($Creds.AppUrl)/search/$($ItemType)?$StrSearchOptions&range=$($Range)&forcedisplay[2]=1" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction Ignore
+
+    $forcedisplayString = ""
+    $i=0
+    foreach ($F in $(Get-GlpiSearchOptions -ItemType $ItemType -Creds $Creds  | Where-Object {(($_."ID" -in $ForceDisplay)  -or ($_."Name" -in $ForceDisplay) -or ($_."Field Name" -in $($ForceDisplay | Where-Object {$_ -notlike "name" -and $_ -notlike "id"})))})){
+        $forcedisplayString += "&forcedisplay[$i]=$($F.ID)"
+      $i++
+    }
+
+    $SearchResult = Invoke-RestMethod "$($Creds.AppUrl)/search/$($ItemType)?$StrSearchOptions&range=$($Range)$forcedisplayString" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction Ignore
     if ($SearchResult) {$SearchResult.data}
     else {return $false}
-    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"}
+    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
 }
 
 Function Get-GlpiSearchOptions {
@@ -246,12 +259,18 @@ Function Get-GlpiSearchOptions {
             $Item | Add-Member -Type NoteProperty -Name ID -Value $Option.name
             $Item | Add-Member -Type NoteProperty -Name "Field Name" -Value $Option.value.field
             $Item | Add-Member -Type NoteProperty -Name Name -Value $Option.value.name
+            $Item | Add-Member -Type NoteProperty -Name table -Value $Option.value.table
+            $Item | Add-Member -Type NoteProperty -Name datatype -Value $Option.value.datatype
+            $Item | Add-Member -Type NoteProperty -Name available_searchtypes -Value $Option.value.available_searchtypes
+            $Item | Add-Member -Type NoteProperty -Name uid -Value $Option.value.uid
+            $Item | Add-Member -Type NoteProperty -Name nosearch -Value $Option.value.nosearch
+            $Item | Add-Member -Type NoteProperty -Name nodisplay -Value $Option.value.nodisplay
             $Result += $item
             }
-        $Result
         }
-    else {return $false}
-    Invoke-RestMethod "$($Creds.AppURL)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"}
+    else {$Result = $false}
+    Invoke-RestMethod "$($Creds.AppURL)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
+    return $Result
 }
 
 
@@ -289,13 +308,13 @@ Function Add-GlpiItem {
 .OUTPUTS
     Array
 .NOTES
-    Author:  Jean-Christophe Pirmolin #> 
+    Author:  Jean-Christophe Pirmolin #>
     param([parameter(Mandatory=$true)][String]$ItemType,[parameter(Mandatory=$true)][Object]$Details,[parameter(Mandatory=$true)][Object]$Creds)
-    $Details = @{input=$Details} 
+    $Details = @{input=$Details}
     $SessionToken = GetGLPISessionToken -Creds $Creds
     $json = ConvertTo-Json $Details
     $AddResult = Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)" -Method Post -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -Body $json -ContentType 'application/json'
-    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"}
+    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
     return $AddResult
 }
 
@@ -343,7 +362,7 @@ Function Update-GlpiItem {
     $SessionToken = GetGLPISessionToken -Creds $Creds
     $json = $Details | ConvertTo-Json
     $AddResult = Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)" -Method Put -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -Body $json -ContentType 'application/json'
-    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"}
+    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
     return $AddResult
 }
 
@@ -355,7 +374,7 @@ Function Remove-GlpiItems {
     Retrieve a specific item.
     Return the instance fields of item identified by id
 .PARAMETER ItemType
-    Type of item wanted. 
+    Type of item wanted.
     Exemples : Computer, Monitor, User, etc.
 .PARAMETER IDs
     Array of IDs of item to remove. If only ONE criteria is present, start with a COMA!
