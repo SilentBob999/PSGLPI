@@ -1,17 +1,49 @@
 # Internal Functions have names WITHOUT dash "-" caracter.
 
-Function GetGLPISessionToken {
+Function Set-GLPIToken {
     param($Creds)
-    #Get-Date -f T | write-host -NoNewLine
-    #Write-Host " Enter Function"
-    $Creds.AuthorizationType
     if (("Basic","user_token") -ccontains $Creds.AuthorizationType) {
-        $SessionToken = Invoke-RestMethod "$($Creds.AppURL)/initSession" -Headers @{"Content-Type" = "application/json";"Authorization" = "$($Creds.AuthorizationType) $($Creds.UserToken)";"App-Token"=$Creds.AppToken}
-        # extra restMethod as the first one always return HTML login page instead of result
-        Invoke-RestMethod "$($Creds.AppUrl)/getActiveProfile/" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
-        return $SessionToken
+        $Script:GLPICreds = $Creds
+        GetGLPISessionToken -force $true | Out-Null
     }
-    else {Write-Host 'AuthorizationType MUST be "user-token" or "Basic". This is Case Sensitive.' -ForegroundColor Red}
+    else {
+        throw 'AuthorizationType MUST be "user_token" or "Basic". This is Case Sensitive.'
+    }
+}
+Function GetGLPISessionToken {
+    param(
+        [bool]$Force=$false,
+        $creds
+        )
+
+    if ( ("$($Script:GLPICreds)" -eq "") ){
+        if ("$Creds" -ne "") {
+            Set-GLPIToken $creds
+        } else {
+            throw "GLPI credential not set.  Please use Set-GLPIToken"
+        }
+    }
+    if ( ("$($Script:SessionToken)" -eq "") -or ($true -eq $Force) ) {
+        $Script:SessionToken = Invoke-RestMethod "$($Script:GLPICreds.AppURL)/initSession" -Headers @{"Content-Type" = "application/json";"Authorization" = "$($Script:GLPICreds.AuthorizationType) $($Script:GLPICreds.UserToken)";"App-Token"=$Script:GLPICreds.AppToken}
+    }
+    try {
+        # Test session, also serve as workaround against a bug from plugin MyDashboard (first request return html)
+        Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/getActiveProfile/" -Headers @{"session-token"=$Script:SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"} -ErrorAction SilentlyContinue | Out-Null
+    } catch {
+        try {
+            $Script:SessionToken = Invoke-RestMethod "$($Script:GLPICreds.AppURL)/initSession" -Headers @{"Content-Type" = "application/json";"Authorization" = "$($Script:GLPICreds.AuthorizationType) $($Script:GLPICreds.UserToken)";"App-Token"=$Script:GLPICreds.AppToken}
+            Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/getActiveProfile/" -Headers @{"session-token"=$Script:SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"} -ErrorAction SilentlyContinue | Out-Null
+        } catch {
+            throw "Cannot get a GLPI session token"
+        }
+    }
+    # return for original function compatibility
+    return $Script:SessionToken
+}
+
+function Stop-GlpiSession {
+    param ()
+    Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/killSession" -Headers @{"session-token"=$Script:SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
 }
 
 function Get-GlpiBase64Login {
@@ -52,6 +84,9 @@ Function Get-GlpiItems {
 .PARAMETER Range
     Range of the results.
     Exemple : 0-199
+.PARAMETER QueryOptions
+    Give flexibility to use other option not set in module
+    Like : "searchText[name]=^computername$&only_id=true&get_hateoas=false"
 .PARAMETER Creds
     Credetials for the GLPI API. This is an object.
     Exemple : $GlpiCreds = @{
@@ -68,14 +103,28 @@ Function Get-GlpiItems {
     Array
 .NOTES
     Author:  Jean-Christophe Pirmolin #>
-    param([parameter(Mandatory=$true)][String]$ItemType,[parameter(Mandatory=$false)][String]$Range="0-999",[parameter(Mandatory=$true)][Object]$Creds)
-
-    $UserToken = $Creds.UserToken
+    param([parameter(Mandatory=$true)][String]$ItemType,[parameter(Mandatory=$false)][String]$Range="ALL",$QueryOptions="",[parameter(Mandatory=$false)][Object]$Creds)
+    if ("$QueryOptions" -ne ""){$QueryOptions = "&$QueryOptions"}
     $SessionToken = GetGLPISessionToken -Creds $Creds
-    $SearchResult = Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)/?range=$($Range)" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"}
+    if ($Range -like "ALL") {
+        $SearchResult = @()
+        $x = 0
+        do {
+            try {
+                $while = $true
+                $SearchResult += Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/$($ItemType)/?range=$x-$($x+999)$QueryOptions" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"}
+                $x = $x + 1000
+            }
+            catch {
+                $while = $false
+            }
+        } while ($while)
+    } else {
+        $SearchResult = Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/$($ItemType)/?range=$($Range)$QueryOptions" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"}
+    }
+
     if ($SearchResult.Count -ge 1) {$SearchResult}
     else {$false}
-    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
 }
 
 Function Get-GlpiItem {
@@ -107,12 +156,11 @@ Function Get-GlpiItem {
     Array
 .NOTES
     Author:  Jean-Christophe Pirmolin #>
-    param([parameter(Mandatory=$true)][String]$ItemType, [parameter(Mandatory=$true)][Int]$ID, $QueryOptions="", [parameter(Mandatory=$true)][object]$Creds)
+    param([parameter(Mandatory=$true)][String]$ItemType, [parameter(Mandatory=$true)][Int]$ID, $QueryOptions="", [parameter(Mandatory=$false)][object]$Creds)
     $SessionToken = GetGLPISessionToken -Creds $Creds
-    $SearchResult = Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)/$($ID)?$QueryOptions" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction Ignore
+    $SearchResult = Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/$($ItemType)/$($ID)?$QueryOptions" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"} -ErrorAction Ignore
     if ($SearchResult) {$SearchResult}
     else {$false}
-    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
 }
 
 Function Get-GlpiSubItems {
@@ -127,6 +175,9 @@ Function Get-GlpiSubItems {
 .PARAMETER ID
     ID of item wanted.
     Exemples : 114
+.PARAMETER QueryOptions
+    Give flexibility to use other option not set in module
+    Exemples : ???
 .PARAMETER Relation
     Name of the subitem.
     Exemples : Infocom, NetworkPort, ComputerModel, etc.
@@ -146,12 +197,11 @@ Function Get-GlpiSubItems {
     Array
 .NOTES
     Author:  Jean-Christophe Pirmolin #>
-    param([parameter(Mandatory=$true)][String]$ItemType, [parameter(Mandatory=$true)][Int]$ID, [String]$QueryOptions="", [parameter(Mandatory=$true)][Object]$Creds, [parameter(Mandatory=$true)][String]$Relation)
+    param([parameter(Mandatory=$true)][String]$ItemType, [parameter(Mandatory=$true)][Int]$ID, [String]$QueryOptions="", [parameter(Mandatory=$false)][Object]$Creds, [parameter(Mandatory=$true)][String]$Relation)
     $SessionToken = GetGLPISessionToken -Creds $Creds
-    $SearchResult = Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)/$($ID)/$($Relation)?$QueryOptions" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction Ignore
+    $SearchResult = Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/$($ItemType)/$($ID)/$($Relation)?$QueryOptions" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"} -ErrorAction Ignore
     if ($SearchResult) {$SearchResult}
     else {$false}
-    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
 }
 
 Function Search-GlpiItem {
@@ -166,7 +216,7 @@ Function Search-GlpiItem {
     Exemples : Computer, Monitor, User, etc.
 .PARAMETER SearchOptions
     SearchOptions should be given in a form of array of arrays.
-    ("AND",1,"contains","AMC0132"),("OR",1,"contains","AMC0176)
+    ("AND",1,"contains","AMC0132"),("OR",1,"contains","AMC0176")
     If only ONE criteria is present, start with a COMA!
      ,("OR",1,"contains","AMC0176")
     BE CAREFULL the first coma in the SearchOption definition!!
@@ -197,7 +247,7 @@ Function Search-GlpiItem {
     Array
 .NOTES
     Author:  Jean-Christophe Pirmolin #>
-    param([Parameter(Mandatory=$true)][String] $ItemType,[Parameter(Mandatory=$true)][array] $SearchOptions,[String]$Range="0-999",[array]$ForceDisplay=@("1","2"),[Parameter(Mandatory=$true)][Object] $Creds)
+    param([Parameter(Mandatory=$true)][String] $ItemType,[Parameter(Mandatory=$true)][array] $SearchOptions,[String]$Range="0-99999",[array]$ForceDisplay=@("1","2"),[Parameter(Mandatory=$true)][Object] $Creds)
 
     # Building the SearchOptions String
     $i=0
@@ -217,14 +267,14 @@ Function Search-GlpiItem {
       $i++
     }
 
-    $SearchResult = Invoke-RestMethod "$($Creds.AppUrl)/search/$($ItemType)?$StrSearchOptions&range=$($Range)$forcedisplayString" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction Ignore
+    $SearchResult = Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/search/$($ItemType)?$StrSearchOptions&range=$($Range)$forcedisplayString" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"} -ErrorAction Ignore
     if ($SearchResult) {$SearchResult.data}
     else {return $false}
-    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
 }
 
 Function Get-GlpiSearchOptions {
-<#.SYNOPSIS
+    <#
+.SYNOPSIS
     List search option for GLPI Search Engine.
 .DESCRIPTION
     Expose the GLPI searchEngine options / fields for a specified item type.
@@ -248,12 +298,15 @@ Function Get-GlpiSearchOptions {
     Array
 .NOTES
     Author:  Jean-Christophe Pirmolin #>
-    param([parameter(Mandatory=$true)][String]$ItemType,[parameter(Mandatory=$true)][Object]$Creds)
+    param([parameter(Mandatory=$true)][String]$ItemType,[parameter(Mandatory=$false)][Object]$Creds)
     $SessionToken = GetGLPISessionToken -Creds $Creds
-    $SearchResult = Invoke-RestMethod "$($Creds.AppURL)/listSearchOptions/$($ItemType)" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction Ignore
+    $SearchResult = Invoke-RestMethod "$($Script:GLPICreds.AppURL)/listSearchOptions/$($ItemType)" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"} -ErrorAction Ignore
+    $SearchResultRaw = Invoke-RestMethod "$($Script:GLPICreds.AppURL)/listSearchOptions/$($ItemType)?raw" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"} -ErrorAction Ignore
     if ($SearchResult) {
         $SearchOptions = $SearchResult.PSObject.Properties #| Select-Object -property Value | Select-Object -Property *
+        $SearchOptionsRaw = $SearchResultRaw.PSObject.Properties
         $Result = @()
+        $count = 0
         foreach ($Option in $SearchOptions) {
             $item = New-Object psobject
             $Item | Add-Member -Type NoteProperty -Name ID -Value $Option.name
@@ -265,11 +318,17 @@ Function Get-GlpiSearchOptions {
             $Item | Add-Member -Type NoteProperty -Name uid -Value $Option.value.uid
             $Item | Add-Member -Type NoteProperty -Name nosearch -Value $Option.value.nosearch
             $Item | Add-Member -Type NoteProperty -Name nodisplay -Value $Option.value.nodisplay
+            $Item | Add-Member -Type NoteProperty -Name linkfield -Value @($SearchOptionsRaw)[$count].value.linkfield
+            $Item | Add-Member -Type NoteProperty -Name joinparams -Value @($SearchOptionsRaw)[$count].value.joinparams
+            $Item | Add-Member -Type NoteProperty -Name massiveaction -Value @($SearchOptionsRaw)[$count].value.massiveaction
+            $Item | Add-Member -Type NoteProperty -Name forcegroupby -Value @($SearchOptionsRaw)[$count].value.forcegroupby
+            $Item | Add-Member -Type NoteProperty -Name usehaving -Value @($SearchOptionsRaw)[$count].value.usehaving
+            $Item | Add-Member -Type NoteProperty -Name searchtype -Value @($SearchOptionsRaw)[$count].value.searchtype
             $Result += $item
+            $count += 1
             }
         }
-    else {$Result = $false}
-    Invoke-RestMethod "$($Creds.AppURL)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
+    else {return $false}
     return $Result
 }
 
@@ -309,15 +368,14 @@ Function Add-GlpiItem {
     Array
 .NOTES
     Author:  Jean-Christophe Pirmolin #>
-    param([parameter(Mandatory=$true)][String]$ItemType,[parameter(Mandatory=$true)][Object]$Details,[parameter(Mandatory=$true)][Object]$Creds)
+    param([parameter(Mandatory=$true)][String]$ItemType,[parameter(Mandatory=$true)][Object]$Details,[parameter(Mandatory=$false)][Object]$Creds)
     $Details = @{input=$Details}
     $SessionToken = GetGLPISessionToken -Creds $Creds
     $json = ConvertTo-Json $Details
     if (($Details["input"] | Get-Member -MemberType Properties).Count -eq 1){
         $json = $json.Remove(($lastIndex = $json.LastIndexOf("]")),1).Insert($lastIndex,"").Remove(($firstIndex = $json.IndexOf("[")),1).Insert($firstIndex,"")
     }
-    $AddResult = Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)" -Method Post -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -Body $json -ContentType 'application/json'
-    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
+    $AddResult = Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/$($ItemType)" -Method Post -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"} -Body  ([System.Text.Encoding]::UTF8.GetBytes($json)) -ContentType 'application/json; charset=utf8'
     return $AddResult
 }
 
@@ -359,7 +417,7 @@ Function Update-GlpiItem {
 .OUTPUTS
     Array
 .NOTES
-    Author:  Jean-Christophe Pirmolin #> 
+    Author:  Jean-Christophe Pirmolin #>
     param($ItemType, $Details, $Creds)
     $Details = @{input=$Details}
     $SessionToken = GetGLPISessionToken -Creds $Creds
@@ -367,9 +425,18 @@ Function Update-GlpiItem {
     if (($Details["input"] | Get-Member -MemberType Properties).Count -eq 1){
         $json = $json.Remove(($lastIndex = $json.LastIndexOf("]")),1).Insert($lastIndex,"").Remove(($firstIndex = $json.IndexOf("[")),1).Insert($firstIndex,"")
     }
-    $AddResult = Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)" -Method Put -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -Body $json -ContentType 'application/json'
-    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
-    return $AddResult
+    $UpdateResult = Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/$($ItemType)" -Method Put -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"} -Body  ([System.Text.Encoding]::UTF8.GetBytes($json)) -ContentType 'application/json; charset=utf8'
+
+    # Result formating
+    $Result = @()
+    foreach ($R in $UpdateResult){
+        $ResultItem = New-Object psobject
+        $ResultItem | Add-Member -Type NoteProperty -Name id -Value $(($R.PSObject.Properties | Where-Object TypeNameOfValue -EQ "System.Boolean").name)
+        $ResultItem | Add-Member -Type NoteProperty -Name message -Value "Update $($ItemType): $(($R.PSObject.Properties | Where-Object TypeNameOfValue -EQ "System.Boolean").value) ($(($R.PSObject.Properties | Where-Object TypeNameOfValue -EQ "System.Boolean").name))$(($R.PSObject.Properties | Where-Object name -EQ "message").value)"
+        $Result += $ResultItem
+    }
+
+    return $Result
 }
 
 Function Remove-GlpiItems {
@@ -405,7 +472,7 @@ Function Remove-GlpiItems {
     Array
 .NOTES
     Author:  Jean-Christophe Pirmolin #>
-    param([parameter(Mandatory=$true)][String]$ItemType, [parameter(Mandatory=$true)]$IDs, [Boolean]$Purge=$false, [Boolean]$History=$true, [parameter(Mandatory=$true)][object]$Creds)
+    param([parameter(Mandatory=$true)][String]$ItemType, [parameter(Mandatory=$true)]$IDs, [Boolean]$Purge=$false, [Boolean]$History=$true, [parameter(Mandatory=$false)][object]$Creds)
     # Build array of IDs.
     if ($IDs -notcontains "ID"){
         $ids2 = @()
@@ -423,8 +490,7 @@ Function Remove-GlpiItems {
     $json = $Details | ConvertTo-Json
     #if (($Details["input"] | Get-Member -MemberType Properties).Count -eq 1){
     #    $json = $json.Remove(($lastIndex = $json.LastIndexOf("]")),1).Insert($lastIndex,"").Remove(($firstIndex = $json.IndexOf("[")),1).Insert($firstIndex,"")
-   # }
-   $SessionToken = GetGLPISessionToken -Creds $Creds
-    Invoke-RestMethod "$($Creds.AppUrl)/$($ItemType)" -Method Delete -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -Body $json -ContentType 'application/json'
-    Invoke-RestMethod "$($Creds.AppUrl)/killSession" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Creds.AppToken)"} -ErrorAction SilentlyContinue| Out-Null
+    # }
+    $SessionToken = GetGLPISessionToken -Creds $Creds
+    Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/$($ItemType)" -Method Delete -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"} -Body $json -ContentType 'application/json'
 }
