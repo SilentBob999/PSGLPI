@@ -247,7 +247,7 @@ Function Search-GlpiItem {
     Array
 .NOTES
     Author:  Jean-Christophe Pirmolin #>
-    param([Parameter(Mandatory=$true)][String] $ItemType,[Parameter(Mandatory=$true)][array] $SearchOptions,[String]$Range="0-99999",[array]$ForceDisplay=@("1","2"),[Parameter(Mandatory=$true)][Object] $Creds)
+    param([Parameter(Mandatory=$true)][String] $ItemType,[Parameter(Mandatory=$true)][array] $SearchOptions,[String]$Range="0-99999",[array]$ForceDisplay=@("1","2"),[Parameter(Mandatory=$false)][Object]$Creds)
 
     # Building the SearchOptions String
     $i=0
