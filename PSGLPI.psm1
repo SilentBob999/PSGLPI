@@ -1,5 +1,7 @@
 # Internal Functions have names WITHOUT dash "-" caracter.
 
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
 Function Set-GLPIToken {
     param($Creds)
     if (("Basic","user_token") -ccontains $Creds.AuthorizationType) {
