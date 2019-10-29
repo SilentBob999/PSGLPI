@@ -86,6 +86,9 @@ Function Get-GlpiItems {
 .PARAMETER Range
     Range of the results.
     Exemple : 0-199
+.PARAMETER SearchText
+    SearchText (default NULL): hashtable of filters to pass on the query (with key = field and value the text to search).
+    By default it act as a like "*". Use ^ and $ to force an exact match.
 .PARAMETER QueryOptions
     Give flexibility to use other option not set in module
     Like : "searchText[name]=^computername$&only_id=true&get_hateoas=false"
@@ -99,22 +102,27 @@ Function Get-GlpiItems {
                     }
 .EXAMPLE
      Get-GlpiItems -ItemType "Location" -Range "0-99" -Creds $GlpiCreds
+     Get-GlpiItems -ItemType "Group_Ticket" -SearchText @{"groups_id"="^10$" ; "type"="^2$"}
 .INPUTS
     None
 .OUTPUTS
     Array
 .NOTES
     Author:  Jean-Christophe Pirmolin #>
-    param([parameter(Mandatory=$true)][String]$ItemType,[parameter(Mandatory=$false)][String]$Range="ALL",$QueryOptions="",[parameter(Mandatory=$false)][Object]$Creds)
+    param([parameter(Mandatory=$true)][String]$ItemType,[parameter(Mandatory=$false)][String]$Range="ALL",$QueryOptions="",[parameter(Mandatory=$false)][hashtable]$SearchText,[parameter(Mandatory=$false)][Object]$Creds)
     if ("$QueryOptions" -ne ""){$QueryOptions = "&$QueryOptions"}
     $SessionToken = GetGLPISessionToken -Creds $Creds
+    $SearchTextString = ""
+    foreach ($key in $SearchText.Keys) {
+        $SearchTextString += "&searchText[$($key)]=$($SearchText[$key])"
+    }
     if ($Range -like "ALL") {
         $SearchResult = @()
         $x = 0
         do {
             try {
                 $while = $true
-                $SearchResult += Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/$($ItemType)/?range=$x-$($x+999)$QueryOptions" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"}
+                $SearchResult += Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/$($ItemType)/?range=$x-$($x+999)$($SearchTextString)$($QueryOptions)" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"}
                 $x = $x + 1000
             }
             catch {
@@ -122,7 +130,7 @@ Function Get-GlpiItems {
             }
         } while ($while)
     } else {
-        $SearchResult = Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/$($ItemType)/?range=$($Range)$QueryOptions" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"}
+        $SearchResult = Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/$($ItemType)/?range=$($Range)$($SearchTextString)$($QueryOptions)" -Headers @{"session-token"=$SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"}
     }
 
     if ($SearchResult.Count -ge 1) {$SearchResult}
