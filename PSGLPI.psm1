@@ -13,6 +13,7 @@ Function Set-GLPIToken {
     }
 }
 Function GetGLPISessionToken {
+    [CmdletBinding()]
     param(
         [bool]$Force=$false,
         $creds
@@ -25,10 +26,11 @@ Function GetGLPISessionToken {
             throw "GLPI credential not set.  Please use Set-GLPIToken"
         }
     }
-    if ( ("$($Script:SessionToken)" -eq "") -or ($true -eq $Force) ) {
-        $Script:SessionToken = Invoke-RestMethod "$($Script:GLPICreds.AppURL)/initSession" -Headers @{"Content-Type" = "application/json";"Authorization" = "$($Script:GLPICreds.AuthorizationType) $($Script:GLPICreds.UserToken)";"App-Token"=$Script:GLPICreds.AppToken}
-    }
     try {
+        if ( ("$($Script:SessionToken)" -eq "") -or ($true -eq $Force) ) {
+            $Script:SessionToken = Invoke-RestMethod "$($Script:GLPICreds.AppURL)/initSession" -Headers @{"Content-Type" = "application/json";"Authorization" = "$($Script:GLPICreds.AuthorizationType) $($Script:GLPICreds.UserToken)";"App-Token"=$Script:GLPICreds.AppToken}
+        }
+
         # Test session, also serve as workaround against a bug from plugin MyDashboard (first request return html)
         Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/getActiveProfile/" -Headers @{"session-token"=$Script:SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"} -ErrorAction SilentlyContinue | Out-Null
     } catch {
@@ -36,7 +38,10 @@ Function GetGLPISessionToken {
             $Script:SessionToken = Invoke-RestMethod "$($Script:GLPICreds.AppURL)/initSession" -Headers @{"Content-Type" = "application/json";"Authorization" = "$($Script:GLPICreds.AuthorizationType) $($Script:GLPICreds.UserToken)";"App-Token"=$Script:GLPICreds.AppToken}
             Invoke-RestMethod "$($Script:GLPICreds.AppUrl)/getActiveProfile/" -Headers @{"session-token"=$Script:SessionToken.session_token; "App-Token" = "$($Script:GLPICreds.AppToken)"} -ErrorAction SilentlyContinue | Out-Null
         } catch {
-            throw "Cannot get a GLPI session token"
+            $CustomMessage = "Cannot get a GLPI session token"
+            $CustomError = New-Object Management.Automation.ErrorRecord (
+                [System.Exception]::new($CustomMessage ,$_.Exception),'NotSpecified','OperationStopped',$_)
+            $PScmdlet.ThrowTerminatingError($CustomError)
         }
     }
     # return for original function compatibility
