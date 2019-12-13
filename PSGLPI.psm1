@@ -131,7 +131,14 @@ Function Get-GlpiItems {
                 $x = $x + 1000
             }
             catch {
-                $while = $false
+                if ($_ -like "*ERROR_RANGE_EXCEED_TOTAL*") {
+                    $while = $false
+                } else {
+                    $CustomMessage = "$_"
+                    $CustomError = New-Object Management.Automation.ErrorRecord (
+                        [System.Exception]::new($CustomMessage ,$_.Exception),'NotSpecified','OperationStopped',$_)
+                    $PScmdlet.ThrowTerminatingError($CustomError)
+                }
             }
         } while ($while)
     } else {
